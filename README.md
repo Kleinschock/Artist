@@ -1,14 +1,16 @@
-# Artist
-## [Webpage](https://DiffusionArtist.github.io)| [arXiv](https://arxiv.org/abs/2407.15842) ｜ [HuggingFace Demo](https://huggingface.co/spaces/fffiloni/Artist)
+# DiffArtist: Towards Aesthetic-Aligned Diffusion Model Control for Training-free Text-Driven Stylization
+## [Webpage](https://DiffusionArtist.github.io)| [arXiv](https://arxiv.org/abs/2407.15842) | [HuggingFace Demo](https://huggingface.co/spaces/fffiloni/Artist)
 Official repo for Artist: Aesthetically Controllable Text-Driven Stylization without Training
 ![fig_teaser_large-min](https://github.com/user-attachments/assets/6da1a3e1-aeb7-4fb6-9dfa-9f84c27a7975)
 
-## What is Artist?
-_Artist_ is a training-free text-driven image stylization method. You give an image and input a prompt describing the desired style, _Artist_ give you the stylized image in that style. The detail of the original image and the style you provide is harmonically integrated. 
+## What is DiffArtist?
+_DiffArtist_ is a training-free text-driven image stylization method. You give an image and input a prompt describing the desired style, _Artist_ give you the stylized image in that style. The detail of the original image and the style you provide is harmonically integrated. 
 
 **No** need to train, **no** need to download any ControNets or LoRAs. Just use a pretrained Stable Diffusion.
 
 ## Update
+:fire:Dec 24. Updated paper, added more comparisons and analysis.
+
 :fire:Sep 21. Add config file for playground-v2 (experimental).  
 
 :fire:Jul 22. The paper and inference code is released.  
