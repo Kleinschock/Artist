@@ -1,7 +1,10 @@
 # %%
+
+
 import argparse, os
 
-
+# gradio
+import gradio as gr
 import torch
 import requests
 import torch.nn as nn
@@ -225,23 +228,37 @@ def sample_disentangled(
             pipe, prompt
         )
 
-    # Set num inference steps
-    pipe.scheduler.set_timesteps(num_inference_steps, device=device)
-    # save
+    # --- MODIFICATION START ---
+    # Determine the correct latent shape dynamically from start_latents
+    # start_latents should have the shape [1, channels, height, width] for the single input image
+    if start_latents is None:
+        # Need a default if no start_latents provided (shouldn't happen in this workflow but good practice)
+        height = width = 512 // 8  # Default SD latent size
+        channels = 4  # Standard SD latent channels
+        start_latents = torch.randn((1, channels, height, width), device=device)
+        start_latents *= pipe.scheduler.init_noise_sigma
+        print("Warning: start_latents was None, created default noise.")
+    else:
+        _, channels, height, width = start_latents.shape  # Get dims from actual input latent
 
-    latent_shape = (
-        (1, 4, 64, 64) if isinstance(pipe, StableDiffusionPipeline) else (1, 4, 64, 64)
-    )
-    generative_latent = torch.randn(latent_shape, device=device)
+    # Define the shape for the single generative noise tensor
+    latent_shape = (1, channels, height, width)
+    # --- MODIFICATION END ---
+
+    # Create generative noise with the *correct* dynamic shape and ensure dtype matches
+    generative_latent = torch.randn(latent_shape, device=device, dtype=start_latents.dtype)
     generative_latent *= pipe.scheduler.init_noise_sigma
 
-    latents = start_latents.clone()
+    latents = start_latents.clone()  # Clone the single input latent
 
+    # Repeat the latent for the number of prompts (content anchor, style target, output)
     latents = latents.repeat(len(prompt), 1, 1, 1)
-    # randomly initalize the 1st lantent for generation
 
+    # randomly initialize the 1st latent (index 1, the style delegation branch)
+    # This assignment should now work as shapes match
     latents[1] = generative_latent
-    # assume that the first latent is used for reconstruction
+
+    # assume that the first latent (index 0) is used for reconstruction
     for i in tqdm(range(start_step, num_inference_steps), desc="Stylizing"):
 
         if use_content_anchor:
@@ -502,18 +519,15 @@ if __name__ == "__main__":
         pipe = StableDiffusionPipeline.from_pretrained(
             "stabilityai/stable-diffusion-2-1-base"
         ).to(device)
+        print("--- SD Pipeline Loaded Successfully ---") # ADD THIS
     elif cfg.model == "playground":
-        pipe = DiffusionPipeline.from_pretrained(
-            "playgroundai/playground-v2-1024px-aesthetic",
-            torch_dtype=torch.float16,
-            use_safetensors=True,
-            add_watermarker=False,
-            variant="fp16",
-        )
-        pipe.to("cuda")
+        # ... playground loading ...
+        pipe = DiffusionPipeline.from_pretrained(...)
+        print("--- Playground Pipeline Loaded Successfully ---") # ADD THIS
 
     # Set up a DDIM scheduler
     pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+    print("--- Scheduler Set Up ---") # ADD THIS
 
     out_name = ["content_delegation", "style_delegation", "style_out"]
 
@@ -543,9 +557,10 @@ if __name__ == "__main__":
             image_path = entry["image_path"]
             src_prompt = entry["source_prompt"]
             tgt_prompt = entry["target_prompt"]
-            resolution = 512 if isinstance(pipe, StableDiffusionXLPipeline) else 512
+            # Use resolution from the config file
+            resolution = cfg.resolution
             input_image = utils.exp_utils.get_processed_image(
-                image_path, device, resolution
+                image_path, device, resolution  # Now uses the config value
             )
 
             prompt_in = [
@@ -584,7 +599,9 @@ if __name__ == "__main__":
     elif mode == "cli":
         cfg = OmegaConf.load(config_dir)
         utils.exp_utils.seed_all(cfg.seed)
-        image = utils.exp_utils.get_processed_image(args.image_dir, device, 512)
+
+        image = utils.exp_utils.get_processed_image(args.image_dir, device, cfg.resolution)
+
         tgt_prompt = args.prompt
         src_prompt = ""
         prompt_in = [
@@ -620,57 +637,71 @@ if __name__ == "__main__":
             img.save(f"{out_dir}/{image_base_name}_out_{out_name[j]}.png")
             print(f"Image saved as {out_dir}/{image_base_name}_out_{out_name[j]}.png")
     elif mode == "app":
-        # gradio
-        import gradio as gr
 
         def style_transfer_app(
-            prompt,
-            image,
-            cfg_scale=7.5,
-            num_content_layers=4,
-            num_style_layers=9,
-            seed=0,
-            progress=gr.Progress(track_tqdm=True),
+                prompt,
+                image,  # This is the input from Gradio
+                cfg_scale=7.5,
+                num_content_layers=4,
+                num_style_layers=9,
+                seed=0
         ):
-            utils.exp_utils.seed_all(seed)
-            image = utils.exp_utils.process_image(image, device, 512)
+            print(f"--- Received image of type: {type(image)} ---")  # ADD THIS
+            if isinstance(image, np.ndarray):
+                print(f"--- Received numpy array with shape: {image.shape}, dtype: {image.dtype} ---")  # ADD THIS
+            elif isinstance(image, Image.Image):
+                print(f"--- Received PIL Image with mode: {image.mode}, size: {image.size} ---")  # ADD THIS
+            else:
+                print(f"--- Received unexpected image data ---")  # ADD THIS
 
-            tgt_prompt = prompt
-            src_prompt = ""
-            prompt_in = [
-                "",  # reconstruction
-                tgt_prompt,  # uncontrolled style
-                "",  # controlled style
-            ]
+            try:
+                utils.exp_utils.seed_all(seed)
+                # This is the critical line now
+                processed_image_tensor = utils.exp_utils.process_image(image, device, cfg.resolution)
+                print(
+                    f"--- Successfully processed image to tensor shape: {processed_image_tensor.shape}, dtype: {processed_image_tensor.dtype} ---")  # ADD THIS
 
-            share_resnet_layers = (
-                list(range(num_content_layers)) if num_content_layers != 0 else None
-            )
-            share_attn_layers = (
-                list(range(num_style_layers)) if num_style_layers != 0 else None
-            )
-            imgs = style_image_with_inversion(
-                pipe,
-                image,
-                src_prompt,
-                style_prompt=prompt_in,
-                num_steps=50,
-                start_step=0,
-                guidance_scale=cfg_scale,
-                disentangle=True,
-                resnet_mode="hidden",
-                share_attn=True,
-                share_cross_attn=True,
-                share_resnet_layers=share_resnet_layers,
-                share_attn_layers=share_attn_layers,
-                share_key=True,
-                share_query=True,
-                share_value=False,
-                use_content_anchor=True,
-                use_adain=True,
-                output_dir="./",
-            )
+                tgt_prompt = prompt
+                src_prompt = ""
+                prompt_in = [
+                    "",  # reconstruction
+                    tgt_prompt,  # uncontrolled style
+                    "",  # controlled style
+                ]
 
+                share_resnet_layers = (
+                    list(range(num_content_layers)) if num_content_layers != 0 else None
+                )
+                share_attn_layers = (
+                    list(range(num_style_layers)) if num_style_layers != 0 else None
+                )
+                imgs = style_image_with_inversion(
+                    pipe,
+                    image,
+                    src_prompt,
+                    style_prompt=prompt_in,
+                    num_steps=50,
+                    start_step=0,
+                    guidance_scale=cfg_scale,
+                    disentangle=True,
+                    resnet_mode="hidden",
+                    share_attn=True,
+                    share_cross_attn=True,
+                    share_resnet_layers=share_resnet_layers,
+                    share_attn_layers=share_attn_layers,
+                    share_key=True,
+                    share_query=True,
+                    share_value=False,
+                    use_content_anchor=True,
+                    use_adain=True,
+                    output_dir="./",
+                )
+            except Exception as e:
+                print(f"--- ERROR during image processing or stylization ---")  # ADD THIS
+                import traceback
+                traceback.print_exc()  # ADD THIS - This might show the real error before the h11 crash
+                # Optionally raise the error again or return an error message/image
+                raise gr.Error(f"Processing failed: {e}")  # Inform Gradio user
             return imgs[2]
 
         # load examples

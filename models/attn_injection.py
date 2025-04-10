@@ -14,8 +14,12 @@ import torch.nn as nn
 from torch.nn import functional as nnf
 from diffusers.models import attention_processor
 import einops
-from diffusers.models import unet_2d_condition, attention, transformer_2d, resnet
+#from diffusers.models import unet_2d_condition, attention, transformer_2d, resnet
 from diffusers.models.unets import unet_2d_blocks
+
+from diffusers.models.unets.unet_2d_condition import UNet2DConditionModel
+from diffusers.models.transformers.transformer_2d import Transformer2DModel
+from diffusers.models.resnet import ResnetBlock2D # Or Downsample2D, Upsample2D, etc.
 
 # from diffusers.models.unet_2d import CrossAttnUpBlock2D
 from typing import Optional, List
